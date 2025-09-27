@@ -1,13 +1,15 @@
 package main
 
 import (
+	"database/sql"
+	"log"
 	"net/http"
+	"os"
 	"sync/atomic"
-)
 
-type apiConfig struct {
-	fileserverHits atomic.Int32
-}
+	_ "github.com/lib/pq"
+	"github.com/zrtgzrtg/chirpy/internal/database"
+)
 
 var apiCfg *apiConfig
 
@@ -22,7 +24,18 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	apiCfg = &apiConfig{atomic.Int32{}}
+	dbUrl := os.Getenv("DB_URL")
+	if dbUrl == "" {
+		// fallback for Boot.dev/local tests
+		dbUrl = "postgres://postgres:postgres@localhost:5432/chirpy?sslmode=disable"
+	}
+	platform := os.Getenv("PLATFORM")
+	db, err := sql.Open("postgres", dbUrl)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dbQueries := database.New(db)
+	apiCfg = &apiConfig{atomic.Int32{}, *dbQueries, platform}
 	serverMux := http.NewServeMux()
 	server := &http.Server{
 		Handler: serverMux,
@@ -36,6 +49,7 @@ func main() {
 	serverMux.HandleFunc("GET /api/healthz", handlerReady)
 	serverMux.HandleFunc("GET /admin/metrics", handlerMetrics)
 	serverMux.HandleFunc("POST /admin/reset", handlerReset)
-	serverMux.HandleFunc("POST /api/validate_chirp", handlerValidate)
+	serverMux.HandleFunc("POST /api/users", handlerUser)
+	serverMux.HandleFunc("POST /api/chirps", handlerPostChirp)
 	server.ListenAndServe()
 }
