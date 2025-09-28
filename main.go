@@ -51,5 +51,8 @@ func main() {
 	serverMux.HandleFunc("POST /admin/reset", handlerReset)
 	serverMux.HandleFunc("POST /api/users", handlerUser)
 	serverMux.HandleFunc("POST /api/chirps", handlerPostChirp)
+	serverMux.HandleFunc("GET /api/chirps", handlerGetChirps)
+	serverMux.HandleFunc("GET /api/chirps/{chirpID}", handlerGetChirp)
+	serverMux.HandleFunc("POST /api/login", handlerLogin)
 	server.ListenAndServe()
 }

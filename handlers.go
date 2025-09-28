@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/zrtgzrtg/chirpy/internal/auth"
 	"github.com/zrtgzrtg/chirpy/internal/database"
 )
 
@@ -88,12 +89,26 @@ func handlerUser(w http.ResponseWriter, req *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "No email field in request")
 		return
 	}
-	retUser, err := apiCfg.db.CreateUser(context.Background(), usr.Email)
+	hashPass, err := auth.HashPassword(usr.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "password hashing went wrong")
+		return
+	}
+	crtParams := database.CreateUserParams{
+		Email:          usr.Email,
+		HashedPassword: hashPass,
+	}
+	retUser, err := apiCfg.db.CreateUser(context.Background(), crtParams)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	myUsr := mapToUser(retUser)
+	myUsr := UserResponse{
+		ID:        retUser.ID,
+		CreatedAt: retUser.CreatedAt,
+		UpdatedAt: retUser.UpdatedAt,
+		Email:     retUser.Email,
+	}
 	jsonResp, err := json.Marshal(&myUsr)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "decode error retUser")
@@ -161,4 +176,79 @@ func handlerPostChirp(w http.ResponseWriter, req *http.Request) {
 	}
 	w.WriteHeader(201)
 	w.Write(jsonChirp)
+}
+func handlerGetChirps(w http.ResponseWriter, req *http.Request) {
+	dbChirps, err := apiCfg.db.GetChirps(context.Background())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "chirp request in db went wrong")
+		return
+	}
+	chirps := []Chirp{}
+	for _, chirp := range dbChirps {
+		chirps = append(chirps, mapToChirp(chirp))
+	}
+	chirpsStr, err := json.Marshal(&chirps)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "marshalling chirps went wrong")
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(chirpsStr)
+}
+
+func handlerGetChirp(w http.ResponseWriter, req *http.Request) {
+
+	id := req.PathValue("chirpID")
+	if id == "" {
+		respondWithError(w, http.StatusBadRequest, "no id found. Should probably not get called. This should be equal to the get all chirps endpoint")
+		return
+	}
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "parsing uuid from request went wrong")
+		return
+	}
+	dbChirp, err := apiCfg.db.GetChirpById(context.Background(), uid)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	chirp := mapToChirp(dbChirp)
+	chirpStr, err := json.Marshal(&chirp)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "marshall for chirp went wrong")
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(chirpStr)
+}
+
+func handlerLogin(w http.ResponseWriter, req *http.Request) {
+	loginRequest := LoginRequest{}
+	err := json.NewDecoder(req.Body).Decode(&loginRequest)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "decoding body went wrong")
+		return
+	}
+	usr, err := apiCfg.db.GetUserByEmail(context.Background(), loginRequest.Email)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+		return
+	}
+
+	_, err = auth.CheckPasswordHash(loginRequest.Password, usr.HashedPassword)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+		return
+	}
+	usrResp := UserResponse{
+		ID:        usr.ID,
+		CreatedAt: usr.CreatedAt,
+		UpdatedAt: usr.UpdatedAt,
+		Email:     usr.Email,
+	}
+	w.WriteHeader(http.StatusOK)
+	usrRespStr, err := json.Marshal(&usrResp)
+	w.Write(usrRespStr)
 }
